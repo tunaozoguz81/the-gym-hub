@@ -2,7 +2,7 @@
   "name": "The Gym Hub",
   "short_name": "Gym Hub",
   "description": "Stüdyo Yönetim Paneli",
-  "start_url": "/studio-app/index.html",
+  "start_url": "/the-gym-hub/index.html,
   "display": "standalone",
   "background_color": "#0f172a",
   "theme_color": "#0f172a",
