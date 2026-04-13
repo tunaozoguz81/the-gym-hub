@@ -409,7 +409,11 @@ function tabPackage(m,tr,rem){
   const pct=Math.round((m.packageUsed/m.packageTotal)*100);
   const barClr=rem===0?'#ef4444':rem<=3?'#eab308':'#22c55e';
   return `<div class="space-y-3">
-    ${Auth.isAdmin()?`<button onclick="showRenewModal('${m.id}')" class="btn-primary w-full text-white font-bold py-3 rounded-xl">🔄 Paketi Yenile</button>`:''}
+    ${Auth.isAdmin()?`<div class="grid grid-cols-3 gap-2">
+      <button onclick="showRenewModal('${m.id}')" class="btn-primary text-white font-bold py-3 rounded-xl text-sm">🔄 Yenile</button>
+      <button onclick="manualLesson('${m.id}')" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm">✅ Ders Düş</button>
+      <button onclick="manualCancel('${m.id}')" class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 rounded-xl text-sm">🚫 İptal Düş</button>
+    </div>`:''}
     <div class="card">
       <div class="flex justify-between mb-2">
         <span class="text-slate-400 text-sm">Kullanılan</span>
@@ -904,6 +908,29 @@ function saveMeasure(memberId){
 
 function showRenewModal(memberId){
   document.getElementById('renewmodal')?.classList.remove('hide');
+}
+
+function manualLesson(memberId){
+  const m=DB.memberById(memberId);
+  if(!m){ alert('Üye bulunamadı.'); return; }
+  if(m.packageUsed>=m.packageTotal){ alert('Paketin tüm dersleri kullanılmış.'); return; }
+  const u=Auth.me();
+  const history=m.lessonHistory||[];
+  history.unshift({date:slugDate(),trainerName:u?.name||'Admin',type:'ders'});
+  DB.updateMember(memberId,{packageUsed:(m.packageUsed||0)+1,lessonHistory:history});
+  go('member-detail',{id:memberId,tab:'paket'});
+}
+
+function manualCancel(memberId){
+  const m=DB.memberById(memberId);
+  if(!m){ alert('Üye bulunamadı.'); return; }
+  if(!m.cancelTotal||m.cancelTotal===0){ alert('Bu paketin iptal hakkı yok.'); return; }
+  if((m.cancelUsed||0)>=(m.cancelTotal||0)){ alert('İptal hakkı tükendi.'); return; }
+  const u=Auth.me();
+  const history=m.lessonHistory||[];
+  history.unshift({date:slugDate(),trainerName:u?.name||'Admin',type:'iptal'});
+  DB.updateMember(memberId,{cancelUsed:(m.cancelUsed||0)+1,lessonHistory:history});
+  go('member-detail',{id:memberId,tab:'paket'});
 }
 
 function renewPackage(memberId){
