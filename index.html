@@ -409,6 +409,7 @@ function tabPackage(m,tr,rem){
   const pct=Math.round((m.packageUsed/m.packageTotal)*100);
   const barClr=rem===0?'#ef4444':rem<=3?'#eab308':'#22c55e';
   return `<div class="space-y-3">
+    ${Auth.isAdmin()?`<button onclick="showRenewModal('${m.id}')" class="btn-primary w-full text-white font-bold py-3 rounded-xl">🔄 Paketi Yenile</button>`:''}
     <div class="card">
       <div class="flex justify-between mb-2">
         <span class="text-slate-400 text-sm">Kullanılan</span>
@@ -416,6 +417,21 @@ function tabPackage(m,tr,rem){
       </div>
       <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${barClr}"></div></div>
       <p class="text-sm mt-2 font-semibold" style="color:${barClr}">${rem===0?'❌ Paket tükendi':'✅ '+rem+' ders kaldı'}</p>
+    </div>
+    <!-- Renew Modal -->
+    <div id="renewmodal" class="hide modal-overlay">
+      <div class="modal-sheet">
+        <div class="flex justify-between items-center mb-5">
+          <h3 class="text-white font-bold text-lg">Paketi Yenile</h3>
+          <button onclick="document.getElementById('renewmodal').classList.add('hide')" class="text-slate-400 text-3xl leading-none">×</button>
+        </div>
+        <div class="space-y-3">
+          <div><label class="label">Yeni Paket</label>
+            <select id="rnpk">${DB.settings().packageOptions.map(o=>`<option value="${o}" ${m.packageTotal==o?'selected':''}>${o} Ders</option>`).join('')}</select>
+          </div>
+          <button onclick="renewPackage('${m.id}')" class="btn-primary w-full text-white font-bold py-3.5 rounded-xl mt-2">Yenile</button>
+        </div>
+      </div>
     </div>
     ${m.cancelTotal>0?`
     <div class="card flex items-center justify-between">
@@ -458,6 +474,7 @@ function tabMeasure(m){
           <p class="text-white font-semibold">${esc(r.date)}</p>
           ${Auth.isAdmin()?`<button onclick="delMeasure('${r.id}','${m.id}')" class="text-red-400 text-xs">Sil</button>`:''}
         </div>
+        ${r.photo?`<img src="${r.photo}" class="w-full rounded-xl mb-3 object-cover max-h-48">`:''}
         <div class="grid grid-cols-3 gap-2">
           ${[['Ağırlık',r.weight,'kg'],['Vücut Yağı',r.bodyFat,'%'],['Bel',r.waist,'cm'],
              ['Kalça',r.hip,'cm'],['Göğüs',r.chest,'cm'],['Uyluk',r.thigh,'cm']].map(([l,v,u])=>`
@@ -484,6 +501,7 @@ function tabMeasure(m){
             <div><label class="label">Göğüs (cm)</label><input id="mch" type="number" placeholder="95"></div>
             <div><label class="label">Uyluk (cm)</label><input id="mth" type="number" placeholder="55"></div>
           </div>
+          <div><label class="label">Fotoğraf (opsiyonel)</label><input id="mphoto" type="file" accept="image/*" class="w-full text-slate-300 text-sm bg-slate-700/50 rounded-xl p-2"></div>
           <button onclick="saveMeasure('${m.id}')" class="btn-primary w-full text-white font-bold py-3.5 rounded-xl mt-2">Kaydet</button>
         </div>
       </div>
@@ -850,17 +868,58 @@ function showMeasureModal(memberId){
 }
 
 function saveMeasure(memberId){
-  DB.addMeasure({
-    memberId,
-    date:document.getElementById('md')?.value||slugDate(),
-    weight:parseFloat(document.getElementById('mw')?.value)||null,
-    bodyFat:parseFloat(document.getElementById('mbf')?.value)||null,
-    waist:parseFloat(document.getElementById('mwa')?.value)||null,
-    hip:parseFloat(document.getElementById('mhi')?.value)||null,
-    chest:parseFloat(document.getElementById('mch')?.value)||null,
-    thigh:parseFloat(document.getElementById('mth')?.value)||null,
+  const fileInput=document.getElementById('mphoto');
+  const file=fileInput?.files?.[0];
+  if(file){
+    const reader=new FileReader();
+    reader.onload=function(e){
+      DB.addMeasure({
+        memberId,
+        date:document.getElementById('md')?.value||slugDate(),
+        weight:parseFloat(document.getElementById('mw')?.value)||null,
+        bodyFat:parseFloat(document.getElementById('mbf')?.value)||null,
+        waist:parseFloat(document.getElementById('mwa')?.value)||null,
+        hip:parseFloat(document.getElementById('mhi')?.value)||null,
+        chest:parseFloat(document.getElementById('mch')?.value)||null,
+        thigh:parseFloat(document.getElementById('mth')?.value)||null,
+        photo:e.target.result,
+      });
+      go('member-detail',{id:memberId,tab:'olcum'});
+    };
+    reader.readAsDataURL(file);
+  } else {
+    DB.addMeasure({
+      memberId,
+      date:document.getElementById('md')?.value||slugDate(),
+      weight:parseFloat(document.getElementById('mw')?.value)||null,
+      bodyFat:parseFloat(document.getElementById('mbf')?.value)||null,
+      waist:parseFloat(document.getElementById('mwa')?.value)||null,
+      hip:parseFloat(document.getElementById('mhi')?.value)||null,
+      chest:parseFloat(document.getElementById('mch')?.value)||null,
+      thigh:parseFloat(document.getElementById('mth')?.value)||null,
+    });
+    go('member-detail',{id:memberId,tab:'olcum'});
+  }
+}
+
+function showRenewModal(memberId){
+  document.getElementById('renewmodal')?.classList.remove('hide');
+}
+
+function renewPackage(memberId){
+  const newTotal=parseInt(document.getElementById('rnpk')?.value);
+  if(!newTotal){ alert('Paket seçiniz.'); return; }
+  const m=DB.memberById(memberId);
+  if(!m){ alert('Üye bulunamadı.'); return; }
+  DB.updateMember(memberId,{
+    packageTotal:newTotal,
+    packageUsed:0,
+    cancelUsed:0,
+    cancelTotal:newTotal===8?2:0,
   });
-  go('member-detail',{id:memberId,tab:'olcum'});
+  document.getElementById('renewmodal')?.classList.add('hide');
+  alert('Paket başarıyla yenilendi!');
+  go('member-detail',{id:memberId,tab:'paket'});
 }
 
 function delMeasure(measId,memberId){
