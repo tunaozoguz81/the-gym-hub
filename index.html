@@ -1,31 +1,980 @@
-const CACHE = 'gymhub-v6';
-const ASSETS = [
-  '/the-gym-hub/index.html',
-  '/the-gym-hub/manifest.json',
-];
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>The Gym Hub</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0f172a">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Gym Hub">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *{-webkit-tap-highlight-color:transparent;box-sizing:border-box;}
+    body{background:#0f172a;color:#fff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;margin:0;overscroll-behavior:none;}
+    .hide{display:none!important;}
+    .btn-primary{background:linear-gradient(135deg,#22c55e,#16a34a);border:none;cursor:pointer;}
+    .btn-primary:active{opacity:.85;}
+    .card{background:#1e293b;border-radius:14px;padding:16px;}
+    .bottom-nav{background:#0a1120;border-top:1px solid #1e293b;position:fixed;bottom:0;left:0;right:0;z-index:50;padding-bottom:env(safe-area-inset-bottom);}
+    .tab-active{border-bottom:2px solid #22c55e;color:#22c55e;}
+    input,select,textarea{background:#0f172a;color:#fff;border:1.5px solid #334155;border-radius:10px;padding:11px 14px;width:100%;outline:none;font-size:16px;}
+    input:focus,select:focus,textarea:focus{border-color:#22c55e;}
+    select option{background:#1e293b;}
+    textarea{resize:none;}
+    .page{min-height:100dvh;padding-bottom:80px;}
+    header{background:#0a1120;border-bottom:1px solid #1e293b;position:sticky;top:0;z-index:40;padding:14px 16px;display:flex;align-items:center;}
+    .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:60;display:flex;align-items:flex-end;}
+    .modal-sheet{background:#1e293b;width:100%;border-radius:20px 20px 0 0;padding:20px 16px 40px;max-height:90dvh;overflow-y:auto;}
+    #reader{width:100%;}
+    #reader video{border-radius:12px;}
+    .progress-bar{background:#1e293b;border-radius:99px;height:10px;overflow:hidden;}
+    .progress-fill{height:100%;border-radius:99px;transition:width .4s;}
+    ::-webkit-scrollbar{display:none;}
+    .spinner{width:28px;height:28px;border:3px solid #334155;border-top-color:#22c55e;border-radius:50%;animation:spin .7s linear infinite;margin:0 auto;}
+    @keyframes spin{to{transform:rotate(360deg)}}
+  </style>
+</head>
+<body>
+<div id="app"></div>
+<script>
+const uid = () => '_' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+const esc = t => String(t ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const today = () => new Date().toLocaleDateString('tr-TR');
+const fmtDate = d => d ? new Date(d).toLocaleDateString('tr-TR') : '—';
+const slugDate = d => d || new Date().toISOString().split('T')[0];
 
-self.addEventListener('install', e => {
-  e.waitUntil(
-    caches.open(CACHE).then(c => c.addAll(ASSETS)).then(() => self.skipWaiting())
-  );
-});
+const DB = {
+  _g(k){ try{ return JSON.parse(localStorage.getItem(k)) }catch{ return null } },
+  _s(k,v){ localStorage.setItem(k,JSON.stringify(v)) },
 
-self.addEventListener('activate', e => {
-  e.waitUntil(
-    caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE).map(k => caches.delete(k)))
-    ).then(() => self.clients.claim())
-  );
-});
+  init(){
+    if(!this._g('gh_settings'))
+      this._s('gh_settings',{packageOptions:[8,12,20],studioName:'The Gym Hub'});
+    if(!this._g('gh_users'))
+      this._s('gh_users',[{id:'admin-001',name:'Admin',role:'admin',username:'TheGymHub2025',password:'Aezakmi2471.',trainerProfile:null}]);
+    const users=this._g('gh_users')||[];
+    const ai=users.findIndex(u=>u.id==='admin-001');
+    if(ai>=0){users[ai].username='TheGymHub2025';users[ai].password='Aezakmi2471.';this._s('gh_users',users);}
+    if(!this._g('gh_members'))   this._s('gh_members',[]);
+    if(!this._g('gh_measures'))  this._s('gh_measures',[]);
+  },
 
-self.addEventListener('fetch', e => {
-  if (e.request.mode === 'navigate') {
-    e.respondWith(
-      caches.match('/the-gym-hub/index.html').then(cached => cached || fetch(e.request))
-    );
+  settings(){ return this._g('gh_settings')||{packageOptions:[8,12,20]}; },
+  saveSettings(s){ this._s('gh_settings',s); },
+
+  users(){ return this._g('gh_users')||[]; },
+  userById(id){ return this.users().find(u=>u.id===id); },
+  userByName(un){ return this.users().find(u=>u.username===un); },
+  trainers(){ return this.users().filter(u=>u.role==='trainer'); },
+  addUser(u){ const a=this.users(); u.id=uid(); a.push(u); this._s('gh_users',a); return u; },
+  updateUser(id,data){
+    const a=this.users(); const i=a.findIndex(u=>u.id===id);
+    if(i>=0){a[i]={...a[i],...data};this._s('gh_users',a);}
+  },
+  deleteUser(id){ this._s('gh_users',this.users().filter(u=>u.id!==id)); },
+
+  members(){ return this._g('gh_members')||[]; },
+  memberById(id){ return this.members().find(m=>m.id===id); },
+  addMember(m){ const a=this.members(); m.id=uid(); m.lessonHistory=[]; a.push(m); this._s('gh_members',a); return m; },
+  updateMember(id,data){
+    const a=this.members(); const i=a.findIndex(m=>m.id===id);
+    if(i>=0){a[i]={...a[i],...data};this._s('gh_members',a);}
+  },
+  deleteMember(id){
+    this._s('gh_members',this.members().filter(m=>m.id!==id));
+    this._s('gh_measures',this.measures().filter(m=>m.memberId!==id));
+  },
+  deductLesson(memberId, trainerId){
+    const a=this.members(); const i=a.findIndex(m=>m.id===memberId);
+    if(i<0||a[i].packageUsed>=a[i].packageTotal) return false;
+    a[i].packageUsed++;
+    const tr=this.userById(trainerId);
+    a[i].lessonHistory.unshift({date:today(),trainerName:tr?tr.name:'Bilinmiyor',trainerId});
+    this._s('gh_members',a);
+    return true;
+  },
+
+  useCancel(memberId, trainerId){
+    const a=this.members(); const i=a.findIndex(m=>m.id===memberId);
+    if(i<0) return false;
+    const m=a[i];
+    if((m.cancelUsed||0)>=(m.cancelTotal||0)) return false;
+    a[i].cancelUsed=(m.cancelUsed||0)+1;
+    const tr=this.userById(trainerId);
+    a[i].lessonHistory.unshift({date:today(),trainerName:tr?tr.name:'Bilinmiyor',trainerId,type:'iptal'});
+    this._s('gh_members',a);
+    return true;
+  },
+
+  measures(){ return this._g('gh_measures')||[]; },
+  measuresByMember(id){ return this.measures().filter(m=>m.memberId===id).sort((a,b)=>new Date(b.date)-new Date(a.date)); },
+  addMeasure(d){ const a=this.measures(); d.id=uid(); a.push(d); this._s('gh_measures',a); },
+  deleteMeasure(id){ this._s('gh_measures',this.measures().filter(m=>m.id!==id)); },
+};
+
+const Auth = {
+  login(un,pw){
+    const u=DB.userByName(un);
+    if(u&&u.password===pw){ localStorage.setItem('gh_sess',JSON.stringify({id:u.id,role:u.role,name:u.name})); return u; }
+    return null;
+  },
+  logout(){ localStorage.removeItem('gh_sess'); },
+  me(){ try{ return JSON.parse(localStorage.getItem('gh_sess')); }catch{ return null; } },
+  isAdmin(){ const u=this.me(); return u&&u.role==='admin'; },
+};
+
+let VIEW='login', PARAMS={};
+let _scanner=null, _chart=null;
+
+function go(view,params={}){
+  if(_scanner){ try{_scanner.stop();}catch{} _scanner=null; }
+  if(_chart){ _chart.destroy(); _chart=null; }
+  VIEW=view; PARAMS=params;
+  draw();
+}
+
+function draw(){
+  const u=Auth.me();
+  if(!u && VIEW!=='login') VIEW='login';
+  const map={login:vLogin,dashboard:vDashboard,members:vMembers,
+    'member-form':vMemberForm,'member-detail':vMemberDetail,
+    scanner:vScanner,trainers:vTrainers,'trainer-form':vTrainerForm,settings:vSettings};
+  document.getElementById('app').innerHTML=(map[VIEW]||vLogin)();
+  afterDraw();
+}
+
+function navBar(active){
+  const u=Auth.me(); if(!u) return '';
+  const tabs=u.role==='admin'
+    ?[{v:'dashboard',i:'🏠',l:'Ana Sayfa'},{v:'members',i:'👥',l:'Üyeler'},
+      {v:'scanner',i:'📷',l:'QR Tara'},{v:'trainers',i:'🏋️',l:'Hocalar'},{v:'settings',i:'⚙️',l:'Ayarlar'}]
+    :[{v:'dashboard',i:'🏠',l:'Ana Sayfa'},{v:'scanner',i:'📷',l:'QR Tara'},{v:'trainers',i:'🏋️',l:'Hocalar'}];
+  return `<nav class="bottom-nav flex">${tabs.map(t=>`
+    <button onclick="go('${t.v}')" class="flex-1 flex flex-col items-center py-2 text-xs ${active===t.v?'text-green-400':'text-slate-500'}">
+      <span class="text-xl leading-none mb-0.5">${t.i}</span>${esc(t.l)}
+    </button>`).join('')}</nav>`;
+}
+
+function topBar(title,back=null,backP={},showLogo=false){
+  const b=back?`<button onclick="go('${back}',${JSON.stringify(backP)})" class="text-green-400 text-2xl leading-none mr-3 font-light">‹</button>`:'';
+  const logo=showLogo?`<img src="logo.png" alt="" class="h-8 object-contain mr-2">`:'';  
+  return `<header>${b}${logo}<span class="text-white font-bold text-lg flex-1">${esc(title)}</span></header>`;
+}
+
+function statusBadge(rem,total){
+  if(rem===0) return '<span class="text-xs px-2 py-0.5 rounded-full bg-red-900/50 text-red-400 font-bold">Bitti</span>';
+  if(rem<=3)  return `<span class="text-xs px-2 py-0.5 rounded-full bg-yellow-900/50 text-yellow-400 font-bold">${rem}/${total}</span>`;
+  return `<span class="text-xs px-2 py-0.5 rounded-full bg-green-900/50 text-green-400 font-bold">${rem}/${total}</span>`;
+}
+
+function avatar(name,size='w-10 h-10'){
+  const colors=['bg-green-500','bg-pink-600','bg-violet-600','bg-blue-600','bg-teal-600'];
+  const c=colors[(name||'?').charCodeAt(0)%colors.length];
+  return `<div class="${size} ${c} rounded-full flex items-center justify-center font-bold text-white flex-shrink-0">${(name||'?')[0].toUpperCase()}</div>`;
+}
+
+function vLogin(){
+  return `
+  <div class="min-h-dvh flex flex-col items-center justify-center px-6" style="background:linear-gradient(160deg,#0f172a 0%,#1e1b4b 100%)">
+    <div class="w-full max-w-sm">
+      <div class="text-center mb-10">
+        <img src="logo.png" alt="The Gym Hub" class="w-48 mx-auto mb-2 object-contain" style="max-height:120px">
+        <h1 class="text-4xl font-black text-white tracking-tight">The Gym Hub</h1>
+        <p class="text-slate-400 mt-2">Stüdyo Yönetim Paneli</p>
+      </div>
+      <div class="card space-y-4">
+        <div>
+          <label class="text-xs text-slate-400 mb-1.5 block">Kullanıcı Adı</label>
+          <input id="lu" type="text" placeholder="Kullanıcı adınız" autocomplete="off" autocorrect="off" autocapitalize="off">
+        </div>
+        <div>
+          <label class="text-xs text-slate-400 mb-1.5 block">Şifre</label>
+          <input id="lp" type="password" placeholder="••••••••">
+        </div>
+        <div id="lerr" class="hide text-red-400 text-sm text-center py-1 bg-red-900/20 rounded-lg"></div>
+        <button onclick="doLogin()" class="btn-primary w-full text-white font-bold py-3.5 rounded-xl text-base">
+          Giriş Yap
+        </button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function vDashboard(){
+  const u=Auth.me(), members=DB.members();
+  const td=today();
+  const todayN=members.reduce((n,m)=>n+(m.lessonHistory?.[0]?.date===td?1:0),0);
+  const expN=members.filter(m=>m.packageUsed>=m.packageTotal).length;
+  const lowN=members.filter(m=>{const r=m.packageTotal-m.packageUsed;return r>0&&r<=3;}).length;
+  return `
+  <div class="page">
+    ${topBar('', null, {}, true)}
+    <div class="px-4 pt-5 pb-4">
+      <div class="flex items-center mb-6">
+        <div>
+          <p class="text-slate-400 text-sm">Hoş geldiniz 👋</p>
+          <h2 class="text-white text-xl font-bold">${esc(u.name)}</h2>
+        </div>
+        <span class="ml-auto text-3xl">${u.role==='admin'?'👑':'🏋️'}</span>
+      </div>
+      <div class="grid grid-cols-2 gap-3 mb-6">
+        <div class="card text-center py-5">
+          <div class="text-4xl font-black text-green-400">${members.length}</div>
+          <div class="text-slate-400 text-xs mt-1">Toplam Üye</div>
+        </div>
+        <div class="card text-center py-5">
+          <div class="text-4xl font-black text-green-400">${todayN}</div>
+          <div class="text-slate-400 text-xs mt-1">Bugün Gelen</div>
+        </div>
+        <div class="card text-center py-5">
+          <div class="text-4xl font-black text-yellow-400">${lowN}</div>
+          <div class="text-slate-400 text-xs mt-1">Az Ders Kalan</div>
+        </div>
+        <div class="card text-center py-5">
+          <div class="text-4xl font-black text-red-400">${expN}</div>
+          <div class="text-slate-400 text-xs mt-1">Paketi Biten</div>
+        </div>
+      </div>
+      <h3 class="text-white font-semibold mb-3 text-sm uppercase tracking-wide text-slate-400">Hızlı Erişim</h3>
+      <div class="grid grid-cols-2 gap-3">
+        <button onclick="go('scanner')" class="card flex flex-col items-center py-6 active:opacity-70">
+          <span class="text-4xl mb-2">📷</span>
+          <span class="text-white font-semibold">QR Tara</span>
+          <span class="text-slate-500 text-xs mt-0.5">Ders düş</span>
+        </button>
+        ${Auth.isAdmin()?`
+        <button onclick="go('member-form')" class="card flex flex-col items-center py-6 active:opacity-70">
+          <span class="text-4xl mb-2">➕</span>
+          <span class="text-white font-semibold">Üye Ekle</span>
+          <span class="text-slate-500 text-xs mt-0.5">Yeni kayıt</span>
+        </button>`:`
+        <button onclick="go('trainers')" class="card flex flex-col items-center py-6 active:opacity-70">
+          <span class="text-4xl mb-2">🏋️</span>
+          <span class="text-white font-semibold">Hocalar</span>
+          <span class="text-slate-500 text-xs mt-0.5">CV sayfası</span>
+        </button>`}
+      </div>
+      ${expN>0?`<div class="mt-4 bg-red-950/60 border border-red-800/60 rounded-xl p-3.5">
+        <p class="text-red-400 text-sm font-semibold">⚠️ ${expN} üyenin paketi bitmiş</p>
+        <button onclick="go('members')" class="text-red-300 text-xs mt-1 underline">Üyeleri görüntüle →</button>
+      </div>`:''}
+      ${lowN>0||expN>0?`
+      <div class="mt-4">
+        <h3 class="text-slate-400 text-xs uppercase tracking-wide font-semibold mb-2">📲 Hatırlatma Gönder</h3>
+        <div class="space-y-2">
+          ${members.filter(m=>{const r=m.packageTotal-m.packageUsed;return r>=0&&r<=3;}).map(m=>{
+            const r=m.packageTotal-m.packageUsed;
+            const msg=r===0
+              ?`Merhaba ${m.name.split(' ')[0]}, paketindeki dersler sona erdi. Yeni paket almak için bizimle iletişime geçebilirsin 💪`
+              :`Merhaba ${m.name.split(' ')[0]}, paketinde yalnızca ${r} ders kaldı. Yeni paket için bizimle iletişime geçmeyi unutma 💪`;
+            const wa=m.phone?`https://wa.me/90${m.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`:'';
+            return `<div class="card flex items-center justify-between py-3">
+              <div>
+                <p class="text-white text-sm font-semibold">${esc(m.name)}</p>
+                <p class="${r===0?'text-red-400':'text-yellow-400'} text-xs">${r===0?'Paket bitti':''+r+' ders kaldı'}</p>
+              </div>
+              ${wa?`<a href="${wa}" target="_blank" class="bg-green-600 text-white text-xs font-bold px-3 py-2 rounded-xl">WhatsApp</a>`
+                  :`<span class="text-slate-600 text-xs">Telefon yok</span>`}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`:''}
+    </div>
+  </div>
+  ${navBar('dashboard')}`;
+}
+
+function vMembers(){
+  const members=DB.members();
+  return `
+  <div class="page">
+    ${topBar('Üyeler')}
+    <div class="px-4 pt-4">
+      <div class="flex gap-2 mb-4">
+        <input id="msearch" type="search" placeholder="🔍 Üye ara..." oninput="filterMembers(this.value)" class="flex-1">
+        ${Auth.isAdmin()?`<button onclick="go('member-form')" class="btn-primary text-white w-11 h-11 rounded-xl text-2xl leading-none flex-shrink-0 flex items-center justify-center">+</button>`:''}
+      </div>
+      <div id="mlist">${memberCards(members)}</div>
+    </div>
+  </div>
+  ${navBar('members')}`;
+}
+
+function memberCards(list){
+  if(!list.length) return `<div class="text-center py-16 text-slate-500">
+    <div class="text-6xl mb-3">👥</div>
+    <p class="mb-4">Henüz üye yok</p>
+    ${Auth.isAdmin()?`<button onclick="go('member-form')" class="btn-primary text-white px-6 py-2.5 rounded-xl font-semibold">Üye Ekle</button>`:''}
+  </div>`;
+  return list.map(m=>{
+    const rem=m.packageTotal-m.packageUsed;
+    const tr=DB.userById(m.trainerId);
+    return `<div onclick="go('member-detail',{id:'${m.id}'})" class="card mb-3 flex items-center gap-3 active:opacity-70 cursor-pointer">
+      ${avatar(`${m.firstName}${m.lastName}`)}
+      <div class="flex-1 min-w-0">
+        <p class="text-white font-semibold truncate">${esc(m.firstName)} ${esc(m.lastName)}</p>
+        <p class="text-slate-500 text-xs truncate">${tr?esc(tr.name):'Hoca atanmadı'}</p>
+      </div>
+      <div class="text-right flex-shrink-0">
+        ${statusBadge(rem,m.packageTotal)}
+        <p class="text-slate-600 text-xs mt-1">${m.lessonHistory?.[0]?.date||'—'}</p>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function vMemberForm(){
+  const {id}=PARAMS, m=id?DB.memberById(id):null;
+  const settings=DB.settings(), trainers=DB.trainers();
+  return `
+  <div class="page">
+    ${topBar(m?'Üyeyi Düzenle':'Yeni Üye','members')}
+    <div class="px-4 pt-4 space-y-3.5">
+      <div class="grid grid-cols-2 gap-3">
+        <div><label class="label">Ad *</label><input id="ff" type="text" placeholder="Ad" value="${esc(m?.firstName||'')}"></div>
+        <div><label class="label">Soyad *</label><input id="fl" type="text" placeholder="Soyad" value="${esc(m?.lastName||'')}"></div>
+      </div>
+      <div><label class="label">Telefon</label><input id="fp" type="tel" placeholder="0xxx xxx xx xx" value="${esc(m?.phone||'')}"></div>
+      <div><label class="label">Doğum Tarihi</label><input id="fd" type="date" value="${m?.dob||''}"></div>
+      <div><label class="label">Paket *</label>
+        <select id="fk">${settings.packageOptions.map(o=>`<option value="${o}" ${m?.packageTotal==o?'selected':''}>${o} Ders</option>`).join('')}</select>
+      </div>
+      <div><label class="label">Başlangıç Tarihi</label><input id="fs" type="date" value="${m?.startDate||slugDate()}"></div>
+      <div><label class="label">Atanan Hoca</label>
+        <select id="ft"><option value="">— Hoca seçiniz —</option>
+          ${trainers.map(t=>`<option value="${t.id}" ${m?.trainerId===t.id?'selected':''}>${esc(t.name)}</option>`).join('')}
+        </select>
+      </div>
+      <div id="ferr" class="hide text-red-400 text-sm bg-red-900/20 rounded-lg p-3"></div>
+      <button onclick="saveMember('${id||''}')" class="btn-primary w-full text-white font-bold py-3.5 rounded-xl">${m?'Güncelle':'Üye Ekle'}</button>
+      ${m?`<button onclick="delMember('${id}')" class="w-full bg-red-900/30 border border-red-800/50 text-red-400 font-semibold py-3 rounded-xl">Üyeyi Sil</button>`:''}
+    </div>
+  </div>
+  ${navBar('members')}`;
+}
+
+function vMemberDetail(){
+  const {id,tab='qr'}=PARAMS, m=DB.memberById(id);
+  if(!m) return `<div class="p-4 text-white">Üye bulunamadı. <button onclick="go('members')" class="text-green-400">Geri dön</button></div>`;
+  const tr=DB.userById(m.trainerId), rem=m.packageTotal-m.packageUsed;
+  const tabs=[['qr','📱 QR Kod'],['paket','🎫 Paket'],['olcum','📊 Ölçümler']];
+  let content='';
+  if(tab==='qr')    content=tabQR(m);
+  if(tab==='paket') content=tabPackage(m,tr,rem);
+  if(tab==='olcum') content=tabMeasure(m);
+  return `
+  <div class="page">
+    ${topBar(`${esc(m.firstName)} ${esc(m.lastName)}`,'members')}
+    <div class="px-4 pt-3">
+      <div class="card flex items-center gap-3 mb-4">
+        ${avatar(`${m.firstName}${m.lastName}`,'w-12 h-12')}
+        <div class="flex-1 min-w-0">
+          <p class="text-white font-bold">${esc(m.firstName)} ${esc(m.lastName)}</p>
+          <p class="text-slate-400 text-sm">${esc(m.phone||'—')}</p>
+        </div>
+        ${Auth.isAdmin()?`<button onclick="go('member-form',{id:'${id}'})" class="text-green-400 text-sm font-semibold flex-shrink-0">Düzenle</button>`:''}
+      </div>
+      <div class="flex border-b border-slate-700/60 mb-4">
+        ${tabs.map(([t,l])=>`<button onclick="go('member-detail',{id:'${id}',tab:'${t}'})"
+          class="flex-1 text-sm py-2.5 font-semibold ${tab===t?'tab-active':'text-slate-500'}">${l}</button>`).join('')}
+      </div>
+      ${content}
+    </div>
+  </div>
+  ${navBar('members')}`;
+}
+
+function tabQR(m){
+  return `<div class="flex flex-col items-center py-6 gap-4">
+    <p class="text-slate-400 text-sm text-center">Üyenin QR kodunu okutarak ders düşebilirsiniz</p>
+    <div class="bg-white p-4 rounded-2xl shadow-xl" id="qr-wrap"></div>
+    <p class="text-slate-600 text-xs">ID: ${m.id}</p>
+  </div>`;
+}
+
+function tabPackage(m,tr,rem){
+  const pct=Math.round((m.packageUsed/m.packageTotal)*100);
+  const barClr=rem===0?'#ef4444':rem<=3?'#eab308':'#22c55e';
+  return `<div class="space-y-3">
+    ${Auth.isAdmin()?`<div class="grid grid-cols-3 gap-2">
+      <button onclick="showRenewModal('${m.id}')" class="btn-primary text-white font-bold py-3 rounded-xl text-sm">🔄 Yenile</button>
+      <button onclick="manualLesson('${m.id}')" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded-xl text-sm">✅ Ders Düş</button>
+      <button onclick="manualCancel('${m.id}')" class="bg-yellow-600 hover:bg-yellow-500 text-white font-bold py-3 rounded-xl text-sm">🚫 İptal Düş</button>
+    </div>`:''}
+    <div class="card">
+      <div class="flex justify-between mb-2">
+        <span class="text-slate-400 text-sm">Kullanılan</span>
+        <span class="text-white font-bold">${m.packageUsed} / ${m.packageTotal} ders</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill" style="width:${pct}%;background:${barClr}"></div></div>
+      <p class="text-sm mt-2 font-semibold" style="color:${barClr}">${rem===0?'❌ Paket tükendi':'✅ '+rem+' ders kaldı'}</p>
+    </div>
+    <div id="renewmodal" class="hide modal-overlay">
+      <div class="modal-sheet">
+        <div class="flex justify-between items-center mb-5">
+          <h3 class="text-white font-bold text-lg">Paketi Yenile</h3>
+          <button onclick="document.getElementById('renewmodal').classList.add('hide')" class="text-slate-400 text-3xl leading-none">×</button>
+        </div>
+        <div class="space-y-3">
+          <div><label class="label">Yeni Paket</label>
+            <select id="rnpk">${DB.settings().packageOptions.map(o=>`<option value="${o}" ${m.packageTotal==o?'selected':''}>${o} Ders</option>`).join('')}</select>
+          </div>
+          <button onclick="renewPackage('${m.id}')" class="btn-primary w-full text-white font-bold py-3.5 rounded-xl mt-2">Yenile</button>
+        </div>
+      </div>
+    </div>
+    ${m.cancelTotal>0?`
+    <div class="card flex items-center justify-between">
+      <div>
+        <p class="text-white font-semibold">İptal Hakkı</p>
+        <p class="text-slate-400 text-xs mt-0.5">8 derslık paket avantajı</p>
+      </div>
+      <div class="text-right">
+        <span class="text-2xl font-black ${(m.cancelTotal-(m.cancelUsed||0))>0?'text-yellow-400':'text-slate-500'}">${m.cancelTotal-(m.cancelUsed||0)}</span>
+        <p class="text-slate-500 text-xs">/ ${m.cancelTotal} kaldı</p>
+      </div>
+    </div>`:''}
+    <div class="card">
+      <p class="text-slate-500 text-xs mb-1">Atanan Hoca</p>
+      <p class="text-white">${tr?esc(tr.name):'Atanmadı'}</p>
+    </div>
+    <div class="card">
+      <p class="text-slate-500 text-xs mb-3">Ders Geçmişi</p>
+      ${!m.lessonHistory?.length?'<p class="text-slate-500 text-sm">Henüz ders yapılmadı</p>':
+        m.lessonHistory.slice(0,30).map(h=>`
+        <div class="flex justify-between py-2.5 border-b border-slate-700/50 last:border-0">
+          <div class="flex items-center gap-2">
+            <span>${h.type==='iptal'?'🚫':'✅'}</span>
+            <span class="${h.type==='iptal'?'text-yellow-400':'text-white'} text-sm">${esc(h.date)}</span>
+          </div>
+          <span class="text-slate-400 text-sm">${esc(h.trainerName)}</span>
+        </div>`).join('')}
+    </div>
+  </div>`;
+}
+
+function tabMeasure(m){
+  const meas=DB.measuresByMember(m.id);
+  return `<div class="space-y-3">
+    ${Auth.isAdmin()?`<button onclick="showMeasureModal('${m.id}')" class="btn-primary w-full text-white font-bold py-3 rounded-xl">+ Ölçüm Ekle</button>`:''}
+    ${meas.length>1?`<div class="card"><p class="text-slate-500 text-xs mb-3">Ağırlık Grafiği (kg)</p><canvas id="wc" height="140"></canvas></div>`:''}
+    ${!meas.length?'<p class="text-slate-500 text-sm text-center py-10">Henüz ölçüm kaydı yok</p>':
+      meas.map(r=>`<div class="card">
+        <div class="flex justify-between items-center mb-3">
+          <p class="text-white font-semibold">${esc(r.date)}</p>
+          ${Auth.isAdmin()?`<button onclick="delMeasure('${r.id}','${m.id}')" class="text-red-400 text-xs">Sil</button>`:''}
+        </div>
+        ${r.photo?`<img src="${r.photo}" class="w-full rounded-xl mb-3 object-cover max-h-48">`:''}
+        <div class="grid grid-cols-3 gap-2">
+          ${[['Ağırlık',r.weight,'kg'],['Vücut Yağı',r.bodyFat,'%'],['Bel',r.waist,'cm'],
+             ['Kalça',r.hip,'cm'],['Göğüs',r.chest,'cm'],['Uyluk',r.thigh,'cm']].map(([l,v,u])=>`
+          <div class="bg-slate-700/40 rounded-xl p-2.5 text-center">
+            <p class="text-slate-500 text-xs">${l}</p>
+            <p class="text-white font-bold text-sm">${v!=null&&v!==''?v+'<span class="text-slate-500 text-xs">'+u+'</span>':'—'}</p>
+          </div>`).join('')}
+        </div>
+      </div>`).join('')}
+    <div id="mmodal" class="hide modal-overlay">
+      <div class="modal-sheet">
+        <div class="flex justify-between items-center mb-5">
+          <h3 class="text-white font-bold text-lg">Ölçüm Ekle</h3>
+          <button onclick="document.getElementById('mmodal').classList.add('hide')" class="text-slate-400 text-3xl leading-none">×</button>
+        </div>
+        <div class="space-y-3">
+          <div><label class="label">Tarih</label><input id="md" type="date" value="${slugDate()}"></div>
+          <div class="grid grid-cols-2 gap-3">
+            <div><label class="label">Ağırlık (kg)</label><input id="mw" type="number" step="0.1" placeholder="70.5"></div>
+            <div><label class="label">Vücut Yağı (%)</label><input id="mbf" type="number" step="0.1" placeholder="20"></div>
+            <div><label class="label">Bel (cm)</label><input id="mwa" type="number" placeholder="80"></div>
+            <div><label class="label">Kalça (cm)</label><input id="mhi" type="number" placeholder="90"></div>
+            <div><label class="label">Göğüs (cm)</label><input id="mch" type="number" placeholder="95"></div>
+            <div><label class="label">Uyluk (cm)</label><input id="mth" type="number" placeholder="55"></div>
+          </div>
+          <div><label class="label">Fotoğraf (opsiyonel)</label><input id="mphoto" type="file" accept="image/*" class="w-full text-slate-300 text-sm bg-slate-700/50 rounded-xl p-2"></div>
+          <button onclick="saveMeasure('${m.id}')" class="btn-primary w-full text-white font-bold py-3.5 rounded-xl mt-2">Kaydet</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function vScanner(){
+  return `
+  <div class="page">
+    ${topBar('QR Tara')}
+    <div class="px-4 pt-4">
+      <div class="card mb-4 overflow-hidden p-2">
+        <div id="reader"></div>
+        <p class="text-slate-500 text-xs text-center mt-2">Kamerayı QR koda tutun</p>
+      </div>
+      <div id="sres"></div>
+    </div>
+  </div>
+  ${navBar('scanner')}`;
+}
+
+function vTrainers(){
+  const trainers=DB.trainers(), u=Auth.me();
+  return `
+  <div class="page">
+    ${topBar('Hocalar')}
+    <div class="px-4 pt-4 space-y-4">
+      ${Auth.isAdmin()?`<button onclick="go('trainer-form')" class="btn-primary w-full text-white font-bold py-3 rounded-xl">+ Yeni Hoca Ekle</button>`:''}
+      ${!trainers.length?`<div class="text-center py-16 text-slate-500">
+        <div class="text-6xl mb-3">🏋️</div><p>Henüz hoca eklenmemiş</p>
+      </div>`:trainers.map(t=>trainerCard(t,u)).join('')}
+    </div>
+  </div>
+  ${navBar('trainers')}`;
+}
+
+function trainerCard(t,u){
+  const p=t.trainerProfile||{};
+  const canEdit=u.role==='admin'||u.id===t.id;
+  return `<div class="card">
+    <div class="flex items-start gap-3 mb-3">
+      ${p.photo
+        ?`<img src="${p.photo}" class="w-16 h-16 rounded-2xl object-cover flex-shrink-0">`
+        :`<div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-green-500 to-pink-600 flex items-center justify-center text-3xl flex-shrink-0">${p.avatar||t.name[0].toUpperCase()}</div>`
+      }
+      <div class="flex-1 min-w-0">
+        <h3 class="text-white font-bold text-lg leading-tight">${esc(t.name)}</h3>
+        <p class="text-green-400 text-sm">${esc(p.title||'Personal Trainer')}</p>
+      </div>
+      ${canEdit?`<button onclick="go('trainer-form',{id:'${t.id}'})" class="text-slate-400 text-xl flex-shrink-0">✏️</button>`:''}
+    </div>
+    ${p.bio?`<p class="text-slate-300 text-sm mb-3 leading-relaxed">${esc(p.bio)}</p>`:''}
+    ${p.specialties?.length?`<div class="mb-3">
+      <p class="text-slate-500 text-xs mb-1.5">Uzmanlık</p>
+      <div class="flex flex-wrap gap-1.5">${p.specialties.map(s=>`<span class="bg-green-900/40 text-green-300 text-xs px-2.5 py-1 rounded-full">${esc(s)}</span>`).join('')}</div>
+    </div>`:''}
+    ${p.certifications?.length?`<div class="mb-3">
+      <p class="text-slate-500 text-xs mb-1.5">Sertifikalar</p>
+      <div class="flex flex-wrap gap-1.5">${p.certifications.map(s=>`<span class="bg-slate-700/80 text-slate-300 text-xs px-2.5 py-1 rounded-full">🏆 ${esc(s)}</span>`).join('')}</div>
+    </div>`:''}
+    ${p.phone||p.email?`<div class="border-t border-slate-700/50 pt-3 flex gap-5 flex-wrap">
+      ${p.phone?`<a href="tel:${esc(p.phone)}" class="text-blue-400 text-sm">📞 ${esc(p.phone)}</a>`:''}
+      ${p.email?`<a href="mailto:${esc(p.email)}" class="text-blue-400 text-sm">✉️ ${esc(p.email)}</a>`:''}
+    </div>`:''}
+    ${Auth.isAdmin()?`<div class="border-t border-slate-700/50 pt-3 mt-3">
+      <button onclick="delTrainer('${t.id}')" class="text-red-400 text-xs">Hocayı Sil</button>
+    </div>`:''}
+  </div>`;
+}
+
+function vTrainerForm(){
+  const {id}=PARAMS, t=id?DB.userById(id):null, p=t?.trainerProfile||{};
+  return `
+  <div class="page">
+    ${topBar(t?'Hoca Düzenle':'Yeni Hoca','trainers')}
+    <div class="px-4 pt-4 space-y-3.5">
+      ${!t?`
+      <div><label class="label">Ad Soyad *</label><input id="tn" type="text" placeholder="Ad Soyad"></div>
+      <div><label class="label">Kullanıcı Adı *</label><input id="tu" type="text" placeholder="hoca_adi" autocapitalize="off"></div>
+      <div><label class="label">Şifre *</label><input id="tpw" type="password" placeholder="Şifre"></div>
+      `:`<div class="card"><p class="text-slate-500 text-xs">Ad Soyad</p><p class="text-white font-bold text-lg">${esc(t.name)}</p></div>`}
+      <div><label class="label">Unvan</label><input id="tti" type="text" placeholder="Personal Trainer" value="${esc(p.title||'')}"></div>
+      <div><label class="label">Biyografi</label><textarea id="tb" rows="3" placeholder="Kısa tanıtım...">${esc(p.bio||'')}</textarea></div>
+      <div><label class="label">Uzmanlık Alanları <span class="text-slate-500">(virgülle ayırın)</span></label>
+        <input id="tsp" type="text" placeholder="Fitness, Pilates, Yoga" value="${esc((p.specialties||[]).join(', '))}">
+      </div>
+      <div><label class="label">Sertifikalar <span class="text-slate-500">(virgülle ayırın)</span></label>
+        <input id="tce" type="text" placeholder="ACE, NASM, FISAF" value="${esc((p.certifications||[]).join(', '))}">
+      </div>
+      <div><label class="label">Telefon</label><input id="tph" type="tel" placeholder="0xxx xxx xx xx" value="${esc(p.phone||'')}"></div>
+      <div><label class="label">E-posta</label><input id="tem" type="email" placeholder="hoca@email.com" value="${esc(p.email||'')}"></div>
+      <div><label class="label">Avatar <span class="text-slate-500">(emoji — fotoğraf yoksa)</span></label>
+        <input id="tav" type="text" placeholder="💪" value="${esc(p.avatar||'')}">
+      </div>
+      <div>
+        <label class="label">Fotoğraf</label>
+        <label class="flex flex-col items-center justify-center gap-2 border-2 border-dashed border-slate-600 rounded-xl p-4 cursor-pointer active:opacity-70" id="photo-label">
+          ${p.photo
+            ?`<img src="${p.photo}" class="w-24 h-24 rounded-xl object-cover">`
+            :`<span class="text-4xl">📷</span><span class="text-slate-400 text-sm">Fotoğraf seç</span>`}
+          <input type="file" accept="image/*" onchange="previewPhoto(this)" class="hide">
+        </label>
+        <input type="hidden" id="tph-photo" value="${esc(p.photo||'')}">
+      </div>
+      <div id="terr" class="hide text-red-400 text-sm bg-red-900/20 rounded-lg p-3"></div>
+      <button onclick="saveTrainer('${id||''}')" class="btn-primary w-full text-white font-bold py-3.5 rounded-xl">${t?'Güncelle':'Hoca Ekle'}</button>
+    </div>
+  </div>
+  ${navBar('trainers')}`;
+}
+
+function vSettings(){
+  const s=DB.settings(), u=Auth.me();
+  return `
+  <div class="page">
+    ${topBar('Ayarlar')}
+    <div class="px-4 pt-4 space-y-4">
+      ${Auth.isAdmin()?`<div class="card">
+        <h3 class="text-white font-semibold mb-3">Paket Seçenekleri</h3>
+        <p class="text-slate-500 text-xs mb-2">Ders sayılarını virgülle girin</p>
+        <input id="spk" type="text" value="${s.packageOptions.join(', ')}">
+        <button onclick="saveSettings()" class="btn-primary text-white font-bold py-2.5 px-6 rounded-xl mt-3">Kaydet</button>
+      </div>`:''}
+      <div class="card">
+        <h3 class="text-white font-semibold mb-3">Hesabım</h3>
+        <p class="text-slate-400 text-sm">Kullanıcı: <span class="text-white font-semibold">${esc(u.name)}</span></p>
+        <p class="text-slate-400 text-sm mt-1">Rol: <span class="text-green-400 font-semibold">${u.role==='admin'?'Admin':'Hoca'}</span></p>
+        <button onclick="doLogout()" class="mt-4 w-full bg-red-900/30 border border-red-800/50 text-red-400 font-bold py-3 rounded-xl">Çıkış Yap</button>
+      </div>
+      ${Auth.isAdmin()?`<div class="card">
+        <h3 class="text-white font-semibold mb-3">Yedekleme</h3>
+        <button onclick="exportData()" class="w-full bg-slate-700/60 text-white font-semibold py-3 rounded-xl mb-2 active:opacity-70">📤 Dışa Aktar (JSON)</button>
+        <label class="w-full bg-slate-700/60 text-white font-semibold py-3 rounded-xl flex items-center justify-center cursor-pointer active:opacity-70">
+          📥 İçe Aktar
+          <input type="file" accept=".json" onchange="importData(this)" class="hide">
+        </label>
+      </div>`:''}
+    </div>
+  </div>
+  ${navBar('settings')}`;
+}
+
+function afterDraw(){
+  const {tab,id}=PARAMS;
+  if(VIEW==='member-detail' && tab==='qr'){
+    setTimeout(()=>{
+      const w=document.getElementById('qr-wrap');
+      if(w&&typeof QRCode!=='undefined'){
+        new QRCode(w,{text:id,width:220,height:220,colorDark:'#000',colorLight:'#fff'});
+      }
+    },60);
+  }
+  if(VIEW==='member-detail' && tab==='olcum'){
+    setTimeout(()=>{
+      const canvas=document.getElementById('wc');
+      if(!canvas) return;
+      const data=DB.measuresByMember(id).filter(r=>r.weight!=null).reverse();
+      if(data.length<2) return;
+      _chart=new Chart(canvas,{
+        type:'line',
+        data:{
+          labels:data.map(r=>r.date),
+          datasets:[{label:'kg',data:data.map(r=>r.weight),
+            borderColor:'#22c55e',backgroundColor:'rgba(34,197,94,.12)',
+            tension:.35,fill:true,pointBackgroundColor:'#22c55e',pointRadius:4}]
+        },
+        options:{responsive:true,
+          plugins:{legend:{display:false}},
+          scales:{
+            x:{ticks:{color:'#64748b',maxRotation:30,font:{size:10}},grid:{color:'#1e293b'}},
+            y:{ticks:{color:'#64748b',font:{size:10}},grid:{color:'#1e293b'}}
+          }
+        }
+      });
+    },80);
+  }
+  if(VIEW==='scanner') setTimeout(startScanner,300);
+}
+
+function startScanner(){
+  const u=Auth.me(); if(!u) return;
+  try{
+    _scanner=new Html5Qrcode('reader');
+    _scanner.start(
+      {facingMode:'environment'},
+      {fps:10,qrbox:{width:240,height:240}},
+      decodedText=>{ _scanner.stop(); handleScan(decodedText,u); },
+      ()=>{}
+    ).catch(err=>{
+      const el=document.getElementById('reader');
+      if(el) el.innerHTML=`<div class="text-red-400 text-sm p-4 text-center">⚠️ Kamera erişimi sağlanamadı.<br><small class="text-slate-500">${err}</small></div>`;
+    });
+  }catch(e){
+    const el=document.getElementById('reader');
+    if(el) el.innerHTML=`<div class="text-slate-500 text-sm p-4 text-center">QR tarayıcı yüklenemedi.</div>`;
+  }
+}
+
+function handleScan(memberId, u){
+  const el=document.getElementById('sres');
+  if(!el) return;
+  const m=DB.memberById(memberId);
+  if(!m){
+    el.innerHTML=`<div class="card border border-red-800/60">
+      <p class="text-red-400 font-bold text-center">❌ Üye bulunamadı</p>
+      <p class="text-slate-400 text-sm text-center mt-1">Bu QR koda kayıtlı üye yok</p>
+      <button onclick="go('scanner')" class="btn-primary w-full text-white font-bold py-3 rounded-xl mt-4">Tekrar Dene</button>
+    </div>`;
     return;
   }
-  e.respondWith(
-    caches.match(e.request).then(cached => cached || fetch(e.request))
-  );
+  const rem=m.packageTotal-m.packageUsed;
+  el.innerHTML=`<div class="card border ${rem>0?'border-green-800/60':'border-red-800/60'}">
+    <div class="flex items-center gap-3 mb-4">
+      ${avatar(`${m.firstName}${m.lastName}`,'w-12 h-12')}
+      <div>
+        <p class="text-white font-bold text-lg">${esc(m.firstName)} ${esc(m.lastName)}</p>
+        <p class="text-slate-400 text-sm">${esc(m.phone||'—')}</p>
+      </div>
+    </div>
+    <div class="bg-slate-700/40 rounded-xl p-3 mb-4 flex justify-between items-center">
+      <span class="text-slate-400 text-sm">Kalan Ders</span>
+      <span class="font-black text-xl ${rem>3?'text-green-400':rem>0?'text-yellow-400':'text-red-400'}">${rem}/${m.packageTotal}</span>
+    </div>
+    ${rem>0
+      ?`<button onclick="confirmDeduct('${m.id}','${u.id}')" class="btn-primary w-full text-white font-bold py-3.5 rounded-xl">
+          ✅ Ders Düş — ${rem-1} ders kalır
+        </button>
+        ${(m.cancelTotal||0)>0&&((m.cancelTotal||0)-(m.cancelUsed||0))>0?`
+        <button onclick="confirmCancel('${m.id}','${u.id}')"
+          class="w-full bg-yellow-900/40 border border-yellow-700/50 text-yellow-400 font-bold py-3 rounded-xl">
+          🚫 İptal Hakkı Kullan (${(m.cancelTotal||0)-(m.cancelUsed||0)} hak kaldı)
+        </button>`:''}`
+      :`<div class="text-center text-red-400 font-bold py-2">❌ Paket tükendi — yenileme gerekli</div>`}
+    <button onclick="go('scanner')" class="mt-2 w-full bg-slate-700/50 text-white font-semibold py-3 rounded-xl">Yeni Tarama</button>
+  </div>`;
+}
+
+function previewPhoto(input){
+  const file=input.files[0]; if(!file) return;
+  const reader=new FileReader();
+  reader.onload=e=>{
+    const data=e.target.result;
+    document.getElementById('tph-photo').value=data;
+    const label=document.getElementById('photo-label');
+    if(label) label.innerHTML=`<img src="${data}" class="w-24 h-24 rounded-xl object-cover"><span class="text-slate-400 text-xs mt-1">Değiştirmek için tekrar tıkla</span><input type="file" accept="image/*" onchange="previewPhoto(this)" class="hide">`;
+  };
+  reader.readAsDataURL(file);
+}
+
+function doLogin(){
+  const u=document.getElementById('lu')?.value.trim();
+  const p=document.getElementById('lp')?.value;
+  const user=Auth.login(u,p);
+  if(user){ go('dashboard'); return; }
+  const e=document.getElementById('lerr');
+  e.textContent='Kullanıcı adı veya şifre hatalı.';
+  e.classList.remove('hide');
+}
+function doLogout(){ Auth.logout(); go('login'); }
+
+function filterMembers(q){
+  const res=DB.members().filter(m=>`${m.firstName} ${m.lastName}`.toLowerCase().includes(q.toLowerCase()));
+  const el=document.getElementById('mlist');
+  if(el) el.innerHTML=memberCards(res);
+}
+
+function saveMember(id){
+  const fn=document.getElementById('ff')?.value.trim();
+  const ln=document.getElementById('fl')?.value.trim();
+  const err=document.getElementById('ferr');
+  if(!fn||!ln){ err.textContent='Ad ve soyad zorunludur.'; err.classList.remove('hide'); return; }
+  const data={
+    firstName:fn, lastName:ln,
+    phone:document.getElementById('fp')?.value.trim()||'',
+    dob:document.getElementById('fd')?.value||'',
+    packageTotal:parseInt(document.getElementById('fk')?.value)||8,
+    startDate:document.getElementById('fs')?.value||slugDate(),
+    trainerId:document.getElementById('ft')?.value||'',
+  };
+  if(id){ const ex=DB.memberById(id); data.packageUsed=ex.packageUsed; data.cancelUsed=ex.cancelUsed||0; data.cancelTotal=data.packageTotal===8?2:0; DB.updateMember(id,data); }
+  else{ data.packageUsed=0; data.cancelUsed=0; data.cancelTotal=data.packageTotal===8?2:0; DB.addMember(data); }
+  go('members');
+}
+
+function delMember(id){
+  if(confirm('Bu üyeyi ve tüm verilerini silmek istiyor musunuz?')){ DB.deleteMember(id); go('members'); }
+}
+
+function saveTrainer(id){
+  const err=document.getElementById('terr');
+  const profile={
+    title:document.getElementById('tti')?.value.trim()||'',
+    bio:document.getElementById('tb')?.value.trim()||'',
+    specialties:(document.getElementById('tsp')?.value||'').split(',').map(s=>s.trim()).filter(Boolean),
+    certifications:(document.getElementById('tce')?.value||'').split(',').map(s=>s.trim()).filter(Boolean),
+    phone:document.getElementById('tph')?.value.trim()||'',
+    email:document.getElementById('tem')?.value.trim()||'',
+    avatar:document.getElementById('tav')?.value.trim()||'',
+    photo:document.getElementById('tph-photo')?.value||'',
+  };
+  if(id){ DB.updateUser(id,{trainerProfile:profile}); go('trainers'); return; }
+  const name=document.getElementById('tn')?.value.trim();
+  const uname=document.getElementById('tu')?.value.trim();
+  const pw=document.getElementById('tpw')?.value;
+  if(!name||!uname||!pw){ err.textContent='Ad, kullanıcı adı ve şifre zorunludur.'; err.classList.remove('hide'); return; }
+  if(DB.userByName(uname)){ err.textContent='Bu kullanıcı adı zaten kullanılıyor.'; err.classList.remove('hide'); return; }
+  DB.addUser({name,username:uname,password:pw,role:'trainer',trainerProfile:profile});
+  go('trainers');
+}
+
+function delTrainer(id){
+  if(confirm('Bu hocayı silmek istiyor musunuz?')){ DB.deleteUser(id); go('trainers'); }
+}
+
+function confirmCancel(memberId,trainerId){
+  const ok=DB.useCancel(memberId,trainerId);
+  if(!ok) return;
+  const m=DB.memberById(memberId);
+  const el=document.getElementById('sres');
+  if(!el) return;
+  el.innerHTML=`<div class="card border border-yellow-800/60 text-center py-8">
+    <div class="text-6xl mb-3">🚫</div>
+    <p class="text-white font-black text-xl">${esc(m.firstName)} ${esc(m.lastName)}</p>
+    <p class="text-yellow-400 font-semibold mt-2">İptal hakkı kullanıldı</p>
+    <p class="text-slate-400 text-sm mt-1">${(m.cancelTotal||0)-(m.cancelUsed||0)} iptal hakkı kaldı</p>
+    <button onclick="go('scanner')" class="btn-primary text-white font-bold py-3 px-10 rounded-xl mt-5">Yeni Tarama</button>
+  </div>`;
+}
+
+function confirmDeduct(memberId,trainerId){
+  const ok=DB.deductLesson(memberId,trainerId);
+  if(!ok) return;
+  const m=DB.memberById(memberId);
+  const el=document.getElementById('sres');
+  if(!el) return;
+  el.innerHTML=`<div class="card border border-green-800/60 text-center py-8">
+    <div class="text-6xl mb-3">✅</div>
+    <p class="text-white font-black text-xl">${esc(m.firstName)} ${esc(m.lastName)}</p>
+    <p class="text-green-400 font-semibold mt-2">Ders başarıyla düşüldü</p>
+    <p class="text-slate-400 text-sm mt-1">${m.packageTotal-m.packageUsed} ders kaldı</p>
+    <button onclick="go('scanner')" class="btn-primary text-white font-bold py-3 px-10 rounded-xl mt-5">Yeni Tarama</button>
+  </div>`;
+}
+
+function showMeasureModal(memberId){
+  document.getElementById('mmodal')?.classList.remove('hide');
+}
+
+function saveMeasure(memberId){
+  const fileInput=document.getElementById('mphoto');
+  const file=fileInput?.files?.[0];
+  if(file){
+    const reader=new FileReader();
+    reader.onload=function(e){
+      DB.addMeasure({
+        memberId,
+        date:document.getElementById('md')?.value||slugDate(),
+        weight:parseFloat(document.getElementById('mw')?.value)||null,
+        bodyFat:parseFloat(document.getElementById('mbf')?.value)||null,
+        waist:parseFloat(document.getElementById('mwa')?.value)||null,
+        hip:parseFloat(document.getElementById('mhi')?.value)||null,
+        chest:parseFloat(document.getElementById('mch')?.value)||null,
+        thigh:parseFloat(document.getElementById('mth')?.value)||null,
+        photo:e.target.result,
+      });
+      go('member-detail',{id:memberId,tab:'olcum'});
+    };
+    reader.readAsDataURL(file);
+  } else {
+    DB.addMeasure({
+      memberId,
+      date:document.getElementById('md')?.value||slugDate(),
+      weight:parseFloat(document.getElementById('mw')?.value)||null,
+      bodyFat:parseFloat(document.getElementById('mbf')?.value)||null,
+      waist:parseFloat(document.getElementById('mwa')?.value)||null,
+      hip:parseFloat(document.getElementById('mhi')?.value)||null,
+      chest:parseFloat(document.getElementById('mch')?.value)||null,
+      thigh:parseFloat(document.getElementById('mth')?.value)||null,
+    });
+    go('member-detail',{id:memberId,tab:'olcum'});
+  }
+}
+
+function showRenewModal(memberId){
+  document.getElementById('renewmodal')?.classList.remove('hide');
+}
+
+function manualLesson(memberId){
+  const m=DB.memberById(memberId);
+  if(!m){ alert('Üye bulunamadı.'); return; }
+  if(m.packageUsed>=m.packageTotal){ alert('Paketin tüm dersleri kullanılmış.'); return; }
+  const u=Auth.me();
+  const history=m.lessonHistory||[];
+  history.unshift({date:slugDate(),trainerName:u?.name||'Admin',type:'ders'});
+  DB.updateMember(memberId,{packageUsed:(m.packageUsed||0)+1,lessonHistory:history});
+  go('member-detail',{id:memberId,tab:'paket'});
+}
+
+function manualCancel(memberId){
+  const m=DB.memberById(memberId);
+  if(!m){ alert('Üye bulunamadı.'); return; }
+  if(!m.cancelTotal||m.cancelTotal===0){ alert('Bu paketin iptal hakkı yok.'); return; }
+  if((m.cancelUsed||0)>=(m.cancelTotal||0)){ alert('İptal hakkı tükendi.'); return; }
+  const u=Auth.me();
+  const history=m.lessonHistory||[];
+  history.unshift({date:slugDate(),trainerName:u?.name||'Admin',type:'iptal'});
+  DB.updateMember(memberId,{cancelUsed:(m.cancelUsed||0)+1,lessonHistory:history});
+  go('member-detail',{id:memberId,tab:'paket'});
+}
+
+function renewPackage(memberId){
+  const newTotal=parseInt(document.getElementById('rnpk')?.value);
+  if(!newTotal){ alert('Paket seçiniz.'); return; }
+  const m=DB.memberById(memberId);
+  if(!m){ alert('Üye bulunamadı.'); return; }
+  DB.updateMember(memberId,{
+    packageTotal:newTotal,
+    packageUsed:0,
+    cancelUsed:0,
+    cancelTotal:newTotal===8?2:0,
+  });
+  document.getElementById('renewmodal')?.classList.add('hide');
+  alert('Paket başarıyla yenilendi!');
+  go('member-detail',{id:memberId,tab:'paket'});
+}
+
+function delMeasure(measId,memberId){
+  if(confirm('Bu ölçümü silmek istiyor musunuz?')){ DB.deleteMeasure(measId); go('member-detail',{id:memberId,tab:'olcum'}); }
+}
+
+function saveSettings(){
+  const raw=document.getElementById('spk')?.value||'';
+  const opts=raw.split(',').map(s=>parseInt(s.trim())).filter(n=>!isNaN(n)&&n>0);
+  if(!opts.length){ alert('Geçerli paket seçenekleri giriniz.'); return; }
+  DB.saveSettings({...DB.settings(),packageOptions:opts});
+  alert('Ayarlar kaydedildi.');
+}
+
+function exportData(){
+  const data={users:DB._g('gh_users'),members:DB._g('gh_members'),
+    measures:DB._g('gh_measures'),settings:DB._g('gh_settings'),date:new Date().toISOString()};
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([JSON.stringify(data,null,2)],{type:'application/json'}));
+  a.download=`gymhub-${new Date().toISOString().split('T')[0]}.json`;
+  a.click();
+}
+
+function importData(input){
+  const file=input.files[0]; if(!file) return;
+  const r=new FileReader();
+  r.onload=e=>{
+    try{
+      const d=JSON.parse(e.target.result);
+      if(d.users)   DB._s('gh_users',d.users);
+      if(d.members) DB._s('gh_members',d.members);
+      if(d.measures)DB._s('gh_measures',d.measures);
+      if(d.settings)DB._s('gh_settings',d.settings);
+      alert('Veriler başarıyla içe aktarıldı.');
+      go('dashboard');
+    }catch{ alert('Geçersiz dosya.'); }
+  };
+  r.readAsText(file);
+}
+
+document.addEventListener('keydown',e=>{
+  if(e.key==='Enter'&&VIEW==='login') doLogin();
 });
+
+const style=document.createElement('style');
+style.textContent='.label{display:block;font-size:.7rem;color:#94a3b8;margin-bottom:6px;}';
+document.head.appendChild(style);
+
+DB.init();
+go(Auth.me()?'dashboard':'login');
+
+if('serviceWorker' in navigator){
+  navigator.serviceWorker.register('sw.js').catch(()=>{});
+}
+</script>
+</body>
+</html>
