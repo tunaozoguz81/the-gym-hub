@@ -270,8 +270,8 @@ function vDashboard(){
           ${members.filter(m=>{const r=m.packageTotal-m.packageUsed;return r>=0&&r<=3;}).map(m=>{
             const r=m.packageTotal-m.packageUsed;
             const msg=r===0
-              ?`Merhaba ${m.name.split(' ')[0]}, paketindeki dersler sona erdi. Yeni paket almak için bizimle iletişime geçebilirsin 💪`
-              :`Merhaba ${m.name.split(' ')[0]}, paketinde yalnızca ${r} ders kaldı. Yeni paket için bizimle iletişime geçmeyi unutma 💪`;
+              ?`Merhaba ${m.firstName, paketindeki dersler sona erdi. Yeni paket almak için bizimle iletişime geçebilirsin 💪`
+              :`Merhaba ${m.firstName}, paketinde yalnızca ${r} ders kaldı. Yeni paket için bizimle iletişime geçmeyi unutma 💪`;
             const wa=m.phone?`https://wa.me/90${m.phone.replace(/\D/g,'')}?text=${encodeURIComponent(msg)}`:'';
             return `<div class="card flex items-center justify-between py-3">
               <div>
