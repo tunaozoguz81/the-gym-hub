@@ -600,6 +600,8 @@ function vTrainerForm(){
           <input type="file" accept="image/*" onchange="previewPhoto(this)" class="hide">
         </label>
         <input type="hidden" id="tph-photo" value="${esc(p.photo||'')}">
+        ${p.photo?`<button type="button" onclick="document.getElementById('tph-photo').value='';document.getElementById('photo-label').innerHTML='<span class=\\'text-4xl\\'>📷</span><span class=\\'text-slate-400 text-sm\\'>Fotoğraf seç</span><input type=\\'file\\' accept=\\'image/*\\' onchange=\\'previewPhoto(this)\\' class=\\'hide\\'>';this.remove()" class="w-full bg-red-900/30 border border-red-800/50 text-red-400 font-semibold py-2 rounded-xl mt-2">Fotoğrafı Kaldır</button>`:''}
+
       </div>
       <div id="terr" class="hide text-red-400 text-sm bg-red-900/20 rounded-lg p-3"></div>
       <button onclick="saveTrainer('${id||''}')" class="btn-primary w-full text-white font-bold py-3.5 rounded-xl">${t?'Güncelle':'Hoca Ekle'}</button>
